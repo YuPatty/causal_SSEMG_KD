@@ -1,0 +1,13 @@
+benchmark_msemg_model_source.py is an unmodified snapshot of the user's
+benchmark_package/MSEMG/model.py, originally from:
+https://github.com/yt-tony-liu/MSEMG
+
+The model class bodies match official commit:
+a66f05ddd1cb80a131f4e6aa7d85bf6d828166a9
+
+The original repository is licensed under Apache License, Version 2.0.
+The license is included as LICENSE_MSEMG.txt.
+
+The new benchmark does not alter this snapshot. It executes its original class
+bodies with explicit runtime import bindings, described in README.md. No
+vendored mamba_ssm source or CUDA extensions are redistributed by this package.

@@ -1,0 +1,9 @@
+# Student inference only; Python 3.11 is the recorded cluster version.
+# Teacher KD training still requires the Linux/CUDA Mamba environment.
+torch==2.3.1
+numpy==1.26.4
+scipy==1.16.2
+librosa==0.11.0
+matplotlib==3.8.4
+tqdm==4.67.1
+PyYAML==6.0.2

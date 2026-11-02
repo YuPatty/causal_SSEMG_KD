@@ -385,11 +385,11 @@ Verify causality (future frames must not change past outputs):
     python test_causality.py --config config/student_16ch_1blk_causal.yaml   # expect ✔
     python test_causality.py --config config/student_16ch_1blk.yaml          # expect ✘ (original is non-causal)
 
-**Not yet causal end-to-end:** the STFT front end still uses `center=True`, and streaming synthesis/state handling has not been validated. Only the *network* is causal; window/hop durations are not measured end-to-end latency. A different Student grid does not require retraining the Teacher on that grid when using the waveform re-analysis KD described below.
+**Streaming validation update (2026-11-02):** the network is frame-causal. A bounded-history reference streamer using the existing `center=True` STFT and delayed WOLA synthesis has now passed synthetic future-perturbation and streaming/offline-prefix checks for all four grids. This is a **buffered, delayed** implementation, not zero-lookahead waveform processing. It recomputes finite history rather than caching each layer. For 128/32, the reference emission schedule gives 96–128 ms buffering; server processing time and physical sensor-to-output latency are separate quantities. See [streaming protocol and results](docs/BENCHMARKS.md). A different Student grid does not require retraining the Teacher when using waveform re-analysis KD.
 
-### Cross-resolution experiments (256/64 and 256/128)
+### Cross-resolution experiments (256/64, 256/128 and 128/32)
 
-The current best causal Student uses Teacher 512/128/512 and Student 256/64/256
+The previously recorded 256/64 causal Student uses Teacher 512/128/512 and Student 256/64/256
 (n_fft/hop/win), with the same 16ch/1blk architecture. Use
 `pipeline_distill_crossarch_v6_256_64.py`,
 `config/student_16ch_1blk_causal_256_64.yaml`, and Teacher weights
@@ -409,6 +409,14 @@ Inference can share `inference_student_patched_v6_256_64.py` with the matching
 256/128 YAML. Keep every grid/KD/seed's model, CSV and resume paths separate;
 never let dev and normal jobs write the same experiment concurrently.
 
+The current highest recorded Student SNRimp is **21.1378 dB** with 128/32/128
+Response KD (seed 42). Use `pipeline_distill_crossarch_v6_128_32.py`,
+`distill_loss_v3_128_32.py`, `cross_resolution_128_32.py`, and
+`config/student_16ch_1blk_causal_128_32.yaml`. The 128/32 NoKD run reuses the
+dynamic-STFT `pipeline_distill_crossarch_v6_256_64.py --no_kd` branch.
+Both grids can use `inference_student_patched_v6_256_64.py` with their matching YAML.
+See [128/32 commands, resume and checkpoint requirements](docs/REPRODUCING.md).
+
 Recorded Test-set Average values (not multi-seed averages):
 
 | Model | Window / Hop | KD | SNRimp ↑ (dB) | RMSE ↓ | RMSE_ARV ↓ | MeanF ↓ (Hz) | MedianF ↓ (Hz) | RMSEM ↓ |
@@ -419,10 +427,12 @@ Recorded Test-set Average values (not multi-seed averages):
 | Causal Student | 256 / 128 | No KD | 19.4559 | 0.0101 | 0.0018 | 9.6686 | 19.9868 | 0.0091 |
 | Causal Student | 256 / 128 | Response KD | 19.8847 | 0.0097 | 0.0018 | 9.6936 | 19.9983 | 0.0087 |
 | Causal Student | 256 / 64 | No KD | 20.5371 | 0.0090 | 0.0016 | 8.3531 | 17.5542 | 0.0081 |
-| Causal Student | 256 / 64 | Response KD | **20.7771** | **0.0088** | 0.0016 | 8.6045 | 18.1679 | **0.0079** |
+| Causal Student | 256 / 64 | Response KD | 20.7771 | 0.0088 | 0.0016 | 8.6045 | 18.1679 | 0.0079 |
 | Causal Student | 256 / 64 | Response KD + Time-KD (0.25) | 20.6001 | 0.0090 | 0.0016 | 8.5908 | 18.2037 | 0.0081 |
+| Causal Student | 128 / 32 | No KD | 20.6076 | 0.0090 | 0.0017 | 9.2798 | 19.1895 | 0.0081 |
+| Causal Student | 128 / 32 | Response KD | **21.1378** | **0.0084** | **0.0015** | 8.7150 | 18.1973 | **0.0076** |
 
-256-series Students use seed 42; Teacher/older 512-series seeds are not yet
+256- and 128-series Students use seed 42; Teacher/older 512-series seeds are not yet
 confirmed. MeanF is the logged RMSE_MF/RMSE_MeanF (one metric, not two).
 Historical initialization/resume and concurrent-writer differences mean these
 are recorded experiments, not a strictly controlled single-factor ablation.
@@ -430,6 +440,23 @@ Use the same metrics implementation and batch=64; printed RMSE is not the mean
 of the per-sample CSV RMSE. Inference uses the best-validation `.pth`, not
 `.resume_state.pth`; keep the best 256/64 KD checkpoint named
 `student_16ch_1blk_respKD_causal_256_64_teacher_v2_maskfix_dev.pth` separate from Time-KD.
+
+## Measured efficiency and streaming
+
+The [benchmark protocol and tables](docs/BENCHMARKS.md) distinguish 10-second
+offline processing (all nine models, job 431195) from per-hop streaming
+(four causal Student grids, job 419538). For 128/32, the recorded inference
+model has **45,961 parameters**, **1.185985 Conv/Linear GFLOPs per 10-second input**,
+and **2.551 ms** H100 offline waveform processing time. Streaming GPU processing
+was **2.886 ms median / 2.920 ms p95 per 32 ms hop**, plus the separate
+96–128 ms reference buffering. These are server measurements, not wearable
+hardware end-to-end latency.
+
+Sources and rounded summaries are recorded in [experiment provenance](docs/EXPERIMENTS.md).
+KD/NoKD results are individual recipe runs, not paired multi-seed estimates:
+Teacher construction can consume RNG before Student initialization even with
+the same seed. The 128/32 SNRimp difference is +0.5302 dB in these runs;
+256/64 NoKD still has the lowest recorded Student MeanF/MedianF errors.
 
 ## Installation
 
@@ -453,3 +480,5 @@ CUDA-accelerated Mamba implementation used by the **Teacher**.
 The **Student** (`StudentSSEMGNet`) uses only standard PyTorch convolutions and does
 not import `mamba_ssm` / `causal-conv1d` / `triton`, so once a Student checkpoint is
 trained, `inference_student.py` can run on a CPU-only machine.
+
+For **Student-only inference** on Python 3.11, use `pip install -r requirements-student.txt`; the Teacher/Mamba packages are unnecessary. See [reproduction requirements](docs/REPRODUCING.md) before choosing the entry point. Datasets and checkpoints are not bundled or automatically downloaded.
